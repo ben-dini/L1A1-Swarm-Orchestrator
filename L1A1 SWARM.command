@@ -42,7 +42,7 @@ printf "     │  🚀 Initialisiere Swarm Kernel...\n"
 printf "     │  Verbinde mit Provider (Groq / NVIDIA)...\n"
 printf "     │\n"
 
-cd "/Users/arbenhajdini/Desktop/Swarm_Test"
+cd "/Users/arbenhajdini/Desktop/L1A1-Swarm-Orchestrator"
 if [ ! -f "app.py" ]; then
     printf "     │  ❌ Fehler: app.py nicht gefunden!\n"
     read
