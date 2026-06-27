@@ -199,6 +199,44 @@ def search_web(query: str):
         print(f"     │  \033[31m❌ [Web Tool Fehler]\033[0m {error_msg}")
         return f"Fehler bei der Web-Suche: {error_msg}"
 
+def forecast_time_series(historical_data: str, horizon: int):
+    """
+    Sagt zukünftige Werte für eine Zeitreihe voraus.
+    Nutze dieses Tool, wenn der Nutzer eine Prognose für Verkaufszahlen, Ausgaben, oder andere Datenpunkte möchte.
+    historical_data: Eine komma-getrennte Liste von Zahlen (z.B. "10,20,30,40,50") als String.
+    horizon: Wie viele Schritte in die Zukunft vorhergesagt werden sollen (z.B. 32).
+    """
+    print(f"\n     │  \033[36m📈 [Data Analyst] Berechne TimesFM Prognose für {horizon} Schritte in die Zukunft...\033[0m")
+    try:
+        import timesfm
+        import numpy as np
+        
+        # Parse data
+        data_points = [float(x.strip()) for x in historical_data.split(",") if x.strip()]
+        if len(data_points) < 5:
+            return "Fehler: Zu wenige historische Datenpunkte. Bitte mindestens 5 Punkte übergeben."
+            
+        tfm = timesfm.TimesFm(
+            context_len=512,
+            horizon_len=horizon,
+            input_patch_len=32,
+            output_patch_len=128,
+            num_layers=20,
+            model_dims=1280,
+            backend="cpu"
+        )
+        tfm.load_from_checkpoint(repo_id="google/timesfm-1.0-200m")
+        
+        input_data = np.array(data_points, dtype=np.float32)
+        if len(input_data) > 512:
+            input_data = input_data[-512:]
+            
+        forecast_values, _ = tfm.forecast([input_data])
+        predicted = [round(x, 2) for x in forecast_values[0].tolist()]
+        return f"Erfolgreich prognostiziert. Die nächsten {horizon} Werte lauten:\n{predicted}"
+    except Exception as e:
+        return f"Fehler bei der Prognose: {str(e)}"
+
 # 3. Die Council Sub-Agenten definieren (werden im Hintergrund genutzt)
 coder_agent = Agent(
     name="Coder Agent",
@@ -238,6 +276,14 @@ web_search_agent = Agent(
     tool_choice="auto"
 )
 
+data_scientist_agent = Agent(
+    name="Data Scientist Agent",
+    instructions="Du bist ein genialer Data Scientist. Du nutzt das Google TimesFM Modell (über dein Tool), um Zahlenreihen in die Zukunft zu prognostizieren. WICHTIG: BEANTWORTE NIEMALS EINE PROGNOSE AUS DEINEM EIGENEN WISSEN! Du MUSST immer zuerst das Tool 'forecast_time_series' aufrufen. Führe es genau EINMAL aus und fasse die Prognose dann extrem professionell zusammen.",
+    functions=[forecast_time_series],
+    model=MODEL,
+    tool_choice="auto"
+)
+
 # 4. Die Tool-Funktionen für den Manager, um das Council zu beauftragen
 def beauftrage_team(aufgabe: str):
     """Nutze dies für reine Programmier- oder Code-Schreib-Aufgaben."""
@@ -270,11 +316,18 @@ def beauftrage_datenbank_admin(aufgabe: str):
     return f"Ergebnis der Datenbank-Aufgabe:\n{db_response.messages[-1]['content']}"
 
 def beauftrage_web_researcher(aufgabe: str):
-    """Nutze dies, um Fakten, Wissen oder Erklärungen aus dem Internet/Wikipedia zu suchen."""
-    print("\n     │  \033[36m🌐 [Council] Manager beauftragt Web Search Agenten...\033[0m")
+    """Beauftragt den Web Search Agenten mit Internet-Recherchen."""
+    print(f"\n     │  \033[34m🌐 [Council] Manager beauftragt Web Search Agenten...\033[0m")
     web_response = swarm_client.run(agent=web_search_agent, messages=[{"role": "user", "content": aufgabe}], max_turns=3)
-    print("     │  \033[36m✅ [Council] Web Search Agent ist fertig.\033[0m\n")
+    print(f"     │  \033[32m✅ [Council] Web Search Agent ist fertig.\033[0m")
     return f"Ergebnis der Web-Recherche:\n{web_response.messages[-1]['content']}"
+
+def beauftrage_data_scientist(aufgabe: str):
+    """Beauftragt den Data Scientist Agenten mit der Vorhersage (Forecast) von Zeitreihen oder Zahlen."""
+    print(f"\n     │  \033[34m🌐 [Council] Manager beauftragt Data Scientist Agenten...\033[0m")
+    response = swarm_client.run(agent=data_scientist_agent, messages=[{"role": "user", "content": aufgabe}], max_turns=3)
+    print(f"     │  \033[32m✅ [Council] Data Scientist Agent ist fertig.\033[0m")
+    return f"Ergebnis der Prognose:\n{response.messages[-1]['content']}"
 
 # 5. Der Haupt-Agent (Das Gesicht zum Nutzer)
 import datetime
@@ -283,13 +336,14 @@ manager_instructions = f"""Du bist der technische Projektmanager. Das heutige Da
 - Für lokale System-Interaktionen (Dateien anlegen/lesen, Terminal-Befehle) rufst du das Tool 'beauftrage_system_admin' auf.
 - Für Datenbank-Aufgaben (SQL-Befehle, Speichern, Abfragen) rufst du 'beauftrage_datenbank_admin' auf.
 - Für Wissensfragen, News oder Internet-Recherchen rufst du 'beauftrage_web_researcher' auf. Gib dabei das heutige Datum in deiner Suchanfrage mit, falls nach "heute" oder "gestern" gefragt wird.
+- Für Datenanalyse und Prognosen (Zukunftsvorhersagen von Zahlenreihen) rufst du 'beauftrage_data_scientist' auf.
 
 WICHTIG: Sobald du das Ergebnis eines Tools erhalten hast, fasse es kurz zusammen und antworte dem Nutzer. Rufe das Tool danach NICHT noch einmal auf! Beantworte fachliche Fragen niemals selbst, delegiere sie an dein Team."""
 
 manager_agent = Agent(
     name="Manager",
     instructions=manager_instructions,
-    functions=[beauftrage_team, beauftrage_system_admin, beauftrage_datenbank_admin, beauftrage_web_researcher],
+    functions=[beauftrage_team, beauftrage_system_admin, beauftrage_datenbank_admin, beauftrage_web_researcher, beauftrage_data_scientist],
     model=MODEL,
     tool_choice="auto"
 )
